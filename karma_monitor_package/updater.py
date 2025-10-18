@@ -12,7 +12,7 @@ import zipfile
 import shutil
 from pathlib import Path
 
-GITHUB_REPO = "Lacurity/tikmon-releases"  # Change this to your actual repo
+GITHUB_REPO = "Lacurity/tikmon-releases"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 CURRENT_DIR = Path(__file__).parent
 
