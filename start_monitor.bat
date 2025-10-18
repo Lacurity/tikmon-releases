@@ -53,12 +53,12 @@ if not exist "%DEPS_INSTALLED_FLAG%" (
     )
 )
 
-REM Check for updates automatically
-if exist updater.py (
-    echo [INFO] Checking for updates...
-    python updater.py --silent
-    echo.
-)
+REM Check for updates automatically (skip if GitHub repo doesn't exist yet)
+REM if exist updater.py (
+REM     echo [INFO] Checking for updates...
+REM     python updater.py --silent
+REM     echo.
+REM )
 
 REM Run the monitor
 echo [INFO] Starting Lacs TikTok Monitor...

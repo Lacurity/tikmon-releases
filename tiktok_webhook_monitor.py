@@ -23,7 +23,7 @@ class TikTokWebhookMonitor:
         # Hardcoded configuration - no config file needed
         self.username = "kloudy_gaming"
         self.webhook_url = "https://discord.com/api/webhooks/1428908394441474088/YjTzO5bEyLpEvLA7WRfLowDgramjZBG6fI9aW1tMSWM1GJO9gew0kjYyrWk2dPOigFiL"
-        self.check_interval = 45
+        self.check_interval = 100
         self.monitor_uploads = True
         self.upload_check_interval = 300
         self.enable_logging = True
@@ -119,15 +119,7 @@ class TikTokWebhookMonitor:
     async def check_tiktok_live_status(self) -> Dict[str, Any]:
         """Check if the TikTok user is currently live using multiple methods."""
         
-        # Method 1: Try API endpoint (most reliable)
-        try:
-            result = await self._check_tiktok_api()
-            if result.get("is_live") is not None:
-                return result
-        except Exception as e:
-            self.logger.debug(f"API method failed: {e}")
-        
-        # Method 2: Try direct web scraping
+        # Method 1: Try direct web scraping
         try:
             result = await self._check_tiktok_web()
             if result.get("is_live") is not None:
@@ -135,7 +127,7 @@ class TikTokWebhookMonitor:
         except Exception as e:
             self.logger.debug(f"Web method failed: {e}")
         
-        # Method 3: Try mobile endpoint
+        # Method 2: Try mobile endpoint
         try:
             result = await self._check_tiktok_mobile()
             if result.get("is_live") is not None:
@@ -147,430 +139,213 @@ class TikTokWebhookMonitor:
         self.logger.warning(f"All TikTok check methods failed for @{self.username}")
         return {"is_live": False}
     
-    async def _check_tiktok_api(self) -> Dict[str, Any]:
-        """Check TikTok API endpoint for live status - most reliable method."""
-        
-        # Use the API endpoint that returns JSON data
-        api_url = f"https://www.tiktok.com/api-live/user/room/?aid=1988&app_language=en&app_name=tiktok_web&browser_language=en-US&browser_name=Mozilla&browser_online=true&browser_platform=Win32&browser_version=5.0%20%28Windows%20NT%2010.0%3B%20Win64%3B%20x64%29%20AppleWebKit%2F537.36%20%28KHTML%2C%20like%20Gecko%29%20Chrome%2F120.0.0.0%20Safari%2F537.36&cookie_enabled=true&device_platform=web_pc&focus_state=true&from_page=&history_len=2&is_fullscreen=false&is_page_visible=true&screen_height=1080&screen_width=1920&tz_name=America/New_York&channel=tiktok_web&data_collection_enabled=true&os=windows&priority_region=US&region=US&user_is_login=false&webcast_language=en&msToken=&referer=https://www.tiktok.com/@{self.username}/live&root_referer=https://www.tiktok.com/@{self.username}/live&uniqueId={self.username}&sourceType=54"
-        
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'application/json, text/plain, */*',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache',
-            'Referer': f'https://www.tiktok.com/@{self.username}/live',
-            'Origin': 'https://www.tiktok.com',
-            'Sec-Fetch-Dest': 'empty',
-            'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Site': 'same-origin'
-        }
-        
-        timeout = aiohttp.ClientTimeout(total=10)
-        connector = aiohttp.TCPConnector(limit=10)
-        
-        async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
-            self.logger.info(f"Checking TikTok API endpoint for @{self.username}")
-            
-            try:
-                async with session.get(api_url, headers=headers) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        
-                        # The API structure is: data.liveRoom.status and data.user.status
-                        if 'data' in data and 'liveRoom' in data['data']:
-                            live_room = data['data']['liveRoom']
-                            room_status = live_room.get('status', 0)
-                            user_data = data['data'].get('user', {})
-                            user_status = user_data.get('status', 0)
-                            
-                            # TikTok live status codes:
-                            # 2 = Currently live and broadcasting
-                            # 4 = Live room exists but stream ended/offline  
-                            # 0 = No live room/never went live
-                            
-                            if room_status == 2:
-                                # User is actually live!
-                                stats = live_room.get('liveRoomStats', {})
-                                viewer_count = stats.get('userCount', 0)
-                                enter_count = stats.get('enterCount', 0)
-                                title = live_room.get('title', 'TikTok Live Stream')
-                                
-                                self.logger.info(f"@{self.username} is LIVE! (API room status = 2)")
-                                return {
-                                    "is_live": True,
-                                    "title": title,
-                                    "viewers": viewer_count,
-                                    "total_viewers": enter_count,
-                                    "url": f"https://www.tiktok.com/@{self.username}/live",
-                                    "username": self.username,
-                                    "method": "api_endpoint",
-                                    "detection_reason": f"Live room status = {room_status}"
-                                }
-                            else:
-                                # User is not live (status 4 = ended, status 0 = no room)
-                                status_msg = "ended" if room_status == 4 else "no active room"
-                                self.logger.info(f"@{self.username} is NOT live (room status = {room_status}, {status_msg})")
-                                return {
-                                    "is_live": False,
-                                    "method": "api_endpoint",
-                                    "detection_reason": f"Live room status = {room_status} ({status_msg})"
-                                }
-                        else:
-                            # No live room data in response
-                            self.logger.info(f"@{self.username} is NOT live (no liveRoom data in API response)")
-                            return {
-                                "is_live": False,
-                                "method": "api_endpoint", 
-                                "detection_reason": "No liveRoom data in API response"
-                            }
-                    else:
-                        self.logger.debug(f"API endpoint returned status {response.status}")
-                        raise Exception(f"API returned {response.status}")
-                        
-            except Exception as e:
-                self.logger.debug(f"API endpoint check failed: {str(e)}")
-                raise Exception(f"API endpoint failed: {str(e)}")
-    
     async def _check_tiktok_web(self) -> Dict[str, Any]:
-        """Check TikTok live endpoint for live status - same logic as Karma bot."""
+        """Check TikTok web page for live status - improved logic from Karma bot."""
+        url = f"https://www.tiktok.com/@{self.username}"
         
-        # Use the direct live endpoint - much more reliable
-        live_url = f"https://www.tiktok.com/@{self.username}/live"
-        
-        # Use requests instead of aiohttp for compatibility with Karma bot logic
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.9',
             'Accept-Encoding': 'gzip, deflate, br',
             'Connection': 'keep-alive',
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache',
             'Upgrade-Insecure-Requests': '1',
-            'DNT': '1',
-            'Sec-CH-UA': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-            'Sec-CH-UA-Mobile': '?0',
-            'Sec-CH-UA-Platform': '"Windows"',
             'Sec-Fetch-Dest': 'document',
             'Sec-Fetch-Mode': 'navigate',
             'Sec-Fetch-Site': 'none',
-            'Sec-Fetch-User': '?1'
+            'Sec-Fetch-User': '?1',
+            'Cache-Control': 'no-cache'
         }
         
-        self.logger.info(f"Checking TikTok live endpoint for @{self.username}")
+        timeout = aiohttp.ClientTimeout(total=15)
+        connector = aiohttp.TCPConnector(limit=100, limit_per_host=30)
         
-        try:
-            # Use requests library (synchronous) like in the working test
-            import requests
-            response = requests.get(live_url, headers=headers, timeout=15, allow_redirects=False)
-            status_code = response.status_code
-            self.logger.info(f"Live endpoint returned status: {status_code}")
+        async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
+            self.logger.info(f"Checking TikTok web page for @{self.username}")
             
-            if status_code == 200:
-                # Status 200 doesn't always mean live - need to check content
-                content = response.text
-                self.logger.info(f"Got HTTP 200 on /live endpoint for @{self.username}, checking content...")
-                
-                # Check for actual live stream indicators
-                live_indicators = [
-                    '"isLive":true',
-                    '"liveStatus":1', 
-                    '"roomStatus":2',
-                    '"status":2',  # Live room status ONLY when room is active
-                    'data-e2e="live-avatar"',
-                    'live-room-player',
-                    'live-stream-container',
-                    '"liveRoom":{"status":2',  # Only status 2 means actually live
-                    'class="live-indicator"'  # More specific live indicator
-                ]
-                
-                # Check for "not live" indicators that override live detection
-                not_live_indicators = [
-                    '"isLive":false',
-                    '"liveStatus":0',
-                    '"roomStatus":0',
-                    '"roomStatus":4',  # Room ended
-                    '"status":0',
-                    '"status":4',  # User/room offline or ended
-                    'user-not-live',
-                    'live-room-ended',
-                    'No live videos',
-                    '"liveRoom":{"status":4',  # Live room ended
-                    '"user":{"status":4'  # User offline
-                ]
-                
-                # First check for explicit "not live" indicators
-                has_not_live_indicator = any(indicator in content for indicator in not_live_indicators)
-                if has_not_live_indicator:
-                    self.logger.info(f"@{self.username} is NOT live (found not-live indicators)")
+            async with session.get(url, headers=headers, allow_redirects=True) as response:
+                if response.status == 200:
+                    content = await response.text()
+                    self.logger.info(f"Successfully fetched TikTok page, content length: {len(content)}")
+                    
+                    # Enhanced live detection patterns - more specific to avoid false positives
+                    live_patterns = [
+                        '"isLive":true',
+                        '"liveStatus":1', 
+                        '"isLiving":true',
+                        '"live":true',
+                        '"LiveRoom"',
+                        'live-indicator',
+                        'data-e2e="live"',
+                        '"status":"live"',
+                        '"roomStatus":1',
+                        'live-stream',
+                        'LiveStreamBox',
+                        '"live_room"',
+                        '"liveRoomId"',
+                        '"room_id"',
+                        '"live_url"',
+                        '"stream_url"',
+                        'live_room_info',
+                        '"in_live"',
+                        '"on_live"'
+                    ]
+                    
+                    # Check for any live indicators
+                    found_indicators = []
+                    for pattern in live_patterns:
+                        if pattern in content:
+                            found_indicators.append(pattern)
+                    
+                    # More sophisticated live detection using regex
+                    import re
+                    
+                    # Try to extract live room information - MOST RELIABLE INDICATOR
+                    live_room_match = re.search(r'"liveRoomId":"([^"]+)"', content)
+                    room_status_match = re.search(r'"roomStatus":(\d+)', content)
+                    live_status_match = re.search(r'"liveStatus":(\d+)', content)
+                    is_live_match = re.search(r'"isLive":(true|false)', content)
+                    
+                    # NEW: Look for roomId pattern that appears when live (most reliable)
+                    room_id_match = re.search(r'"roomId":\s*"?(\d+)"?', content)
+                    room_id_numeric = re.search(r'roomId:\s*(\d+)', content)
+                    
+                    # Extract viewer count if available
+                    viewer_patterns = [
+                        r'"viewerCount":(\d+)',
+                        r'"user_count":(\d+)',
+                        r'"total_user":(\d+)',
+                        r'"audience_count":(\d+)',
+                        r'"live_user_count":(\d+)',
+                        r'"userCount":(\d+)',
+                        r'"onlineUserCount":(\d+)',
+                        r'"memberCount":(\d+)'
+                    ]
+                    
+                    viewers = 0
+                    for pattern in viewer_patterns:
+                        match = re.search(pattern, content)
+                        if match:
+                            viewers = int(match.group(1))
+                            break
+                    
+                    # Extract like count
+                    like_patterns = [
+                        r'"diggCount":(\d+)',
+                        r'"likeCount":(\d+)',
+                        r'"like_count":(\d+)',
+                        r'"totalLikes":(\d+)'
+                    ]
+                    
+                    likes = 0
+                    for pattern in like_patterns:
+                        match = re.search(pattern, content)
+                        if match:
+                            likes = int(match.group(1))
+                            break
+                    
+                    # Determine if actually live based on multiple criteria (IMPROVED LOGIC)
+                    is_live = False
+                    detection_reason = "No live indicators found"
+                    
+                    # Check for room ID (strongest indicator based on Karma bot analysis)
+                    if room_id_match and room_id_match.group(1) and len(room_id_match.group(1)) > 5:
+                        is_live = True
+                        detection_reason = f"Live room ID found: {room_id_match.group(1)}"
+                    elif room_id_numeric and room_id_numeric.group(1) and len(room_id_numeric.group(1)) > 5:
+                        is_live = True  
+                        detection_reason = f"Live room ID found (numeric): {room_id_numeric.group(1)}"
+                    elif live_room_match and live_room_match.group(1) != "":
+                        is_live = True
+                        detection_reason = f"Live room ID found: {live_room_match.group(1)}"
+                    elif room_status_match and int(room_status_match.group(1)) == 1:
+                        is_live = True
+                        detection_reason = f"Room status active: {room_status_match.group(1)}"
+                    elif live_status_match and int(live_status_match.group(1)) == 1:
+                        is_live = True
+                        detection_reason = f"Live status active: {live_status_match.group(1)}"
+                    elif is_live_match and is_live_match.group(1) == "true":
+                        is_live = True
+                        detection_reason = "isLive flag is true"
+                    elif len(found_indicators) >= 3:  # Multiple indicators suggest live
+                        is_live = True
+                        detection_reason = f"Multiple indicators: {found_indicators}"
+                    
+                    if is_live:
+                        self.logger.info(f"@{self.username} is LIVE! Reason: {detection_reason}, Viewers: {viewers}")
+                    else:
+                        self.logger.info(f"@{self.username} is not live. Reason: {detection_reason}")
+                    
                     return {
-                        "is_live": False,
-                        "method": "live_endpoint",
-                        "detection_reason": "Not-live indicators found in page content"
-                    }
-                
-                # Check for live indicators
-                has_live_indicator = any(indicator in content for indicator in live_indicators)
-                
-                if not has_live_indicator:
-                    # No live indicators found - probably showing profile page
-                    self.logger.info(f"@{self.username} is NOT live (no live indicators in content)")
-                    return {
-                        "is_live": False,
-                        "method": "live_endpoint",
-                        "detection_reason": "No live indicators found in page content"
-                    }
-                
-                # Found live indicators - user is actually live!
-                self.logger.info(f"@{self.username} is LIVE! (found live indicators in content)")
-                
-                # Try to extract viewer count and likes from live page
-                viewer_count = 0
-                like_count = 0
-                total_viewers = 0
-                
-                # Enhanced patterns for viewer count
-                viewer_patterns = [
-                    r'"viewerCount":(\d+)',
-                    r'"user_count":(\d+)',
-                    r'"userCount":(\d+)',
-                    r'"audience_count":(\d+)',
-                    r'"total_user":(\d+)',
-                    r'"liveRoomStats":\s*\{[^}]*"userCount":(\d+)',
-                    r'"stats":\s*\{[^}]*"viewerCount":(\d+)'
-                ]
-                
-                # Patterns for like count
-                like_patterns = [
-                    r'"diggCount":(\d+)',
-                    r'"likeCount":(\d+)',
-                    r'"like_count":(\d+)',
-                    r'"totalLikes":(\d+)',
-                    r'"liveRoomStats":\s*\{[^}]*"likeCount":(\d+)',
-                    r'"stats":\s*\{[^}]*"diggCount":(\d+)'
-                ]
-                
-                # Patterns for total/peak viewers
-                total_viewer_patterns = [
-                    r'"totalUser":(\d+)',
-                    r'"total_user":(\d+)',
-                    r'"peakViewerCount":(\d+)',
-                    r'"maxUserCount":(\d+)',
-                    r'"liveRoomStats":\s*\{[^}]*"totalUser":(\d+)'
-                ]
-                
-                # Extract viewer count
-                for pattern in viewer_patterns:
-                    match = re.search(pattern, content)
-                    if match:
-                        viewer_count = int(match.group(1))
-                        self.logger.info(f"Found {viewer_count} current viewers")
-                        break
-                
-                # Extract like count
-                for pattern in like_patterns:
-                    match = re.search(pattern, content)
-                    if match:
-                        like_count = int(match.group(1))
-                        self.logger.info(f"Found {like_count} likes")
-                        break
-                
-                # Extract total/peak viewers
-                for pattern in total_viewer_patterns:
-                    match = re.search(pattern, content)
-                    if match:
-                        total_viewers = int(match.group(1))
-                        self.logger.info(f"Found {total_viewers} total viewers")
-                        break
-                
-                return {
-                    "is_live": True,
-                    "title": "TikTok Live Stream",
-                    "viewers": viewer_count,
-                    "likes": like_count,
-                    "total_viewers": total_viewers,
-                    "url": live_url,
-                    "username": self.username,
-                    "method": "live_endpoint",
-                    "detection_reason": "Live indicators found in page content"
-                }
-                
-            elif status_code == 302 or status_code == 301:
-                # Redirect usually means not live - check where it redirects
-                redirect_location = response.headers.get('Location', '')
-                self.logger.info(f"Live endpoint redirected to: {redirect_location}")
-                
-                if '/live' not in redirect_location:
-                    # Redirected away from live page = not live
-                    self.logger.info(f"@{self.username} is not live (redirected away from /live)")
-                    return {
-                        "is_live": False,
-                        "method": "live_endpoint", 
-                        "detection_reason": f"Redirected to: {redirect_location}"
+                        "is_live": is_live,
+                        "title": "TikTok Live Stream",
+                        "viewers": viewers,
+                        "likes": likes,
+                        "total_viewers": viewers,  # Use same value for compatibility
+                        "url": url,
+                        "username": self.username,
+                        "method": "web",
+                        "indicators": found_indicators,
+                        "detection_reason": detection_reason
                     }
                 else:
-                    # Still on live page, might be live - follow redirect
-                    redirect_response = requests.get(redirect_location, headers=headers, timeout=15)
-                    if redirect_response.status_code == 200:
-                        content = redirect_response.text
-                        
-                        # Check for live indicators in redirected page
-                        live_indicators = [
-                            '"isLive":true',
-                            '"liveStatus":1',
-                            '"roomStatus":2',
-                            'live-indicator',
-                            '"LiveRoom"'
-                        ]
-                        
-                        is_live = any(indicator in content for indicator in live_indicators)
-                        
-                        if is_live:
-                            self.logger.info(f"@{self.username} is LIVE! (found indicators after redirect)")
-                            return {
-                                "is_live": True,
-                                "title": "TikTok Live Stream", 
-                                "viewers": 0,
-                                "url": live_url,
-                                "username": self.username,
-                                "method": "live_endpoint",
-                                "detection_reason": "Live indicators in redirected page"
-                            }
-                        else:
-                            self.logger.info(f"@{self.username} is not live (no indicators after redirect)")
-                            return {
-                                "is_live": False,
-                                "method": "live_endpoint",
-                                "detection_reason": "No live indicators after redirect"
-                            }
-                    else:
-                        self.logger.warning(f"Redirect failed with status: {redirect_response.status_code}")
-                        return {
-                            "is_live": False,
-                            "method": "live_endpoint",
-                            "detection_reason": f"Redirect failed: {redirect_response.status_code}"
-                        }
-            
-            elif status_code == 404:
-                # User doesn't exist or page not found
-                self.logger.warning(f"User @{self.username} not found (404)")
-                return {
-                    "is_live": False,
-                    "method": "live_endpoint",
-                    "detection_reason": "User not found (404)"
-                }
-            
-            else:
-                # Other status codes (403, 503, etc.)
-                self.logger.warning(f"Unexpected status {status_code} on live endpoint")
-                return {
-                    "is_live": False,
-                    "method": "live_endpoint", 
-                    "detection_reason": f"HTTP {status_code}"
-                }
-                
-        except requests.RequestException as e:
-            self.logger.error(f"Request error checking live endpoint: {e}")
-            return {
-                "is_live": False,
-                "method": "live_endpoint",
-                "detection_reason": f"Request error: {str(e)}"
-            }
+                    self.logger.warning(f"TikTok web page returned status {response.status}")
+                    raise Exception(f"HTTP {response.status}")
     
     async def _check_tiktok_mobile(self) -> Dict[str, Any]:
-        """Try TikTok mobile live endpoint - backup method."""
-        mobile_live_url = f"https://m.tiktok.com/@{self.username}/live"
+        """Try TikTok mobile endpoint - improved logic from Karma bot."""
+        url = f"https://m.tiktok.com/v/{self.username}"
         
         headers = {
             'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1'
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive'
         }
         
         timeout = aiohttp.ClientTimeout(total=10)
-        connector = aiohttp.TCPConnector(limit=10)
+        connector = aiohttp.TCPConnector(limit=100, limit_per_host=30)
         
         async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
-            self.logger.info(f"Checking mobile live endpoint for @{self.username}")
+            self.logger.debug(f"Trying TikTok mobile endpoint for @{self.username}")
             
-            try:
-                async with session.get(mobile_live_url, headers=headers, allow_redirects=False) as response:
-                    status_code = response.status
-                    self.logger.info(f"Mobile live endpoint returned status: {status_code}")
+            async with session.get(url, headers=headers, allow_redirects=True) as response:
+                if response.status == 200:
+                    content = await response.text()
                     
-                    if status_code == 200:
-                        # Status 200 on mobile doesn't always mean live - check content
-                        content = await response.text()
-                        self.logger.info(f"Got HTTP 200 on mobile /live endpoint for @{self.username}, checking content...")
-                        
-                        # Check for live indicators in mobile version
-                        mobile_live_indicators = [
-                            '"isLive":true',
-                            '"liveStatus":1',
-                            '"roomStatus":2',
-                            'live-indicator',
-                            'data-live="true"',
-                            'live-room',
-                            '"status":2'
-                        ]
-                        
-                        # Check for not-live indicators
-                        mobile_not_live_indicators = [
-                            '"isLive":false',
-                            '"liveStatus":0',
-                            '"roomStatus":0',
-                            '"status":0',
-                            'user-not-live'
-                        ]
-                        
-                        # Check for not-live indicators first
-                        has_not_live = any(indicator in content for indicator in mobile_not_live_indicators)
-                        if has_not_live:
-                            self.logger.info(f"@{self.username} is NOT live (mobile not-live indicators)")
-                            return {
-                                "is_live": False,
-                                "method": "mobile_live_endpoint",
-                                "detection_reason": "Not-live indicators found in mobile page"
-                            }
-                        
-                        # Check for live indicators
-                        has_live = any(indicator in content for indicator in mobile_live_indicators)
-                        if has_live:
-                            self.logger.info(f"@{self.username} is LIVE! (Mobile live indicators found)")
-                            return {
-                                "is_live": True,
-                                "title": "TikTok Live Stream",
-                                "viewers": 0,
-                                "url": mobile_live_url,
-                                "username": self.username,
-                                "method": "mobile_live_endpoint",
-                                "detection_reason": "Live indicators found in mobile page"
-                            }
-                        else:
-                            self.logger.info(f"@{self.username} is NOT live (no mobile live indicators)")
-                            return {
-                                "is_live": False,
-                                "method": "mobile_live_endpoint",
-                                "detection_reason": "No live indicators in mobile page"
-                            }
-                    else:
-                        # Any other status = not live
-                        self.logger.info(f"@{self.username} is not live (mobile endpoint status {status_code})")
-                        return {
-                            "is_live": False,
-                            "method": "mobile_live_endpoint",
-                            "detection_reason": f"HTTP {status_code} on mobile /live endpoint"
-                        }
-                        
-            except Exception as e:
-                self.logger.warning(f"Mobile live endpoint check failed: {str(e)}")
-                raise Exception(f"Mobile endpoint failed: {str(e)}")
+                    # Mobile-specific live patterns (more conservative)
+                    mobile_live_patterns = [
+                        '"isLive":true',
+                        '"live":true',
+                        'live-indicator',
+                        '"status":"live"',
+                        '"liveStatus":1',
+                        '"roomStatus":1'
+                    ]
+                    
+                    found_indicators = [pattern for pattern in mobile_live_patterns if pattern in content]
+                    
+                    # Only consider live if we have strong indicators
+                    is_live = len(found_indicators) > 0
+                    
+                    if is_live:
+                        self.logger.info(f"@{self.username} is LIVE (mobile method)! Found: {found_indicators}")
+                    
+                    return {
+                        "is_live": is_live,
+                        "title": "TikTok Live Stream",
+                        "viewers": 0,
+                        "likes": 0,
+                        "total_viewers": 0,
+                        "url": f"https://www.tiktok.com/@{self.username}",
+                        "username": self.username,
+                        "method": "mobile",
+                        "indicators": found_indicators,
+                        "detection_reason": f"Mobile indicators: {found_indicators}" if found_indicators else "No mobile indicators"
+                    }
+                else:
+                    raise Exception(f"Mobile endpoint returned {response.status}")
     
     async def check_new_uploads(self) -> List[Dict[str, Any]]:
         """Check for new video uploads."""
